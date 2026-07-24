@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import re
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
@@ -15,7 +16,11 @@ PRODUCT_URL = os.getenv(
 ).strip()
 
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "").strip()
-CHECK_INTERVAL_SECONDS = max(30, int(os.getenv("CHECK_INTERVAL_SECONDS", "60")))
+CHECK_INTERVAL_SECONDS = max(30, int(os.getenv("CHECK_INTERVAL_SECONDS", "120")))
+HEARTBEAT_INTERVAL_SECONDS = max(
+    CHECK_INTERVAL_SECONDS,
+    int(os.getenv("HEARTBEAT_INTERVAL_SECONDS", "3600")),
+)
 STARTUP_NOTIFICATION = os.getenv("STARTUP_NOTIFICATION", "true").lower() == "true"
 HEADLESS = os.getenv("HEADLESS", "true").lower() == "true"
 NOTIFY_ON_ERROR = os.getenv("NOTIFY_ON_ERROR", "false").lower() == "true"
@@ -51,6 +56,12 @@ class StockResult:
     available: bool
     reason: str
     title: str
+
+
+def now_kst() -> str:
+    # UTC+9 (Korea Standard Time)
+    timestamp = datetime.now(timezone.utc).timestamp() + (9 * 60 * 60)
+    return datetime.fromtimestamp(timestamp, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S KST")
 
 
 def send_discord(message: str) -> None:
@@ -161,12 +172,14 @@ async def run_monitor() -> None:
 
     previous_available: Optional[bool] = None
     error_notified = False
+    last_heartbeat_at = time.monotonic()
 
     if STARTUP_NOTIFICATION:
         send_discord(
-            "✅ 비스테이지 재고 감시를 시작했어요.\n"
+            "✅ **비스테이지 재고 감시를 시작했어요.**\n"
             f"상품: {PRODUCT_URL}\n"
-            f"확인 주기: {CHECK_INTERVAL_SECONDS}초"
+            f"재고 확인 주기: {CHECK_INTERVAL_SECONDS}초\n"
+            f"상태 알림 주기: {HEARTBEAT_INTERVAL_SECONDS}초"
         )
 
     async with async_playwright() as playwright:
@@ -191,20 +204,32 @@ async def run_monitor() -> None:
                     result.title,
                 )
 
+                # 품절 또는 불확실 상태에서 구매 가능 상태로 바뀌면 즉시 알림
                 if result.available and previous_available is not True:
-                    checked_at = datetime.now(timezone.utc).strftime(
-                        "%Y-%m-%d %H:%M UTC"
-                    )
-
                     send_discord(
                         "🚨 **재입고 감지! 지금 확인해 봐!**\n"
                         f"**{result.title}**\n"
                         f"{PRODUCT_URL}\n"
-                        f"확인 시각: {checked_at}"
+                        f"확인 시각: {now_kst()}"
                     )
 
                 previous_available = result.available
                 error_notified = False
+
+                # 정해진 주기마다 현재 상태 알림
+                current_monotonic = time.monotonic()
+                if current_monotonic - last_heartbeat_at >= HEARTBEAT_INTERVAL_SECONDS:
+                    status_text = "구매 가능" if result.available else "품절"
+                    status_emoji = "🟢" if result.available else "🟡"
+
+                    send_discord(
+                        f"{status_emoji} **아직 정상 감시 중입니다.**\n"
+                        f"상품: **{result.title}**\n"
+                        f"현재 상태: **{status_text}**\n"
+                        f"마지막 확인: {now_kst()}\n"
+                        f"{PRODUCT_URL}"
+                    )
+                    last_heartbeat_at = current_monotonic
 
             except Exception as exc:
                 log.exception("재고 확인 실패: %s", exc)

@@ -11,8 +11,8 @@ import requests
 from playwright.async_api import async_playwright, Page
 
 PRODUCT_URLS = [
-    "https://rolster.bstage.in/shop/products/279",
-    "https://rolster.bstage.in/shop/products/280",
+    url.strip()
+    for url in os.getenv("PRODUCT_URLS").split(",")
 ]
 
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "").strip()

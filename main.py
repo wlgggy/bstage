@@ -132,28 +132,60 @@ async def detect_stock(
         timeout=60_000,
     )
 
-    # SPA 렌더링과 구매 버튼 표시를 기다립니다.
+    # Railway의 새 브라우저에서는 쿠키 동의 화면이 먼저 표시될 수 있습니다.
+    cookie_buttons = (
+        "button:has-text('Allow all cookies'), "
+        "button:has-text('Accept all'), "
+        "button:has-text('모두 허용'), "
+        "button:has-text('전체 동의')"
+    )
+
+    try:
+        cookie_button = page.locator(cookie_buttons).first
+        if await cookie_button.is_visible(timeout=5_000):
+            await cookie_button.click()
+            log.info("쿠키 전체 동의 버튼을 클릭했습니다: %s", product_url)
+            await page.wait_for_timeout(2_000)
+            await page.reload(
+                wait_until="domcontentloaded",
+                timeout=60_000,
+            )
+    except Exception as exc:
+        log.debug(
+            "쿠키 동의 버튼 처리 생략 | url=%s | error=%s",
+            product_url,
+            exc,
+        )
+
+    # SPA 렌더링과 상품 API 응답을 충분히 기다립니다.
     try:
         await page.wait_for_load_state(
             "networkidle",
-            timeout=15_000,
+            timeout=30_000,
         )
     except Exception:
         pass
 
+    product_controls = page.locator(
+        "button[class*='ProductButton_btn'], "
+        "button:has-text('구매하기'), "
+        "a:has-text('구매하기'), "
+        "button:has-text('장바구니'), "
+        "button:has-text('신청하기'), "
+        "button:has-text('예약하기'), "
+        "button:has-text('품절')"
+    )
+
     try:
-        await page.locator(
-            "button:has-text('구매하기'), "
-            "a:has-text('구매하기'), "
-            "button:has-text('장바구니'), "
-            "button:has-text('신청하기'), "
-            "button:has-text('예약하기')"
-        ).first.wait_for(
-            state="attached",
-            timeout=15_000,
+        await product_controls.first.wait_for(
+            state="visible",
+            timeout=30_000,
         )
     except Exception:
-        pass
+        log.warning(
+            "상품 버튼이 30초 안에 나타나지 않았습니다: %s",
+            product_url,
+        )
 
     await page.wait_for_timeout(2_000)
 
@@ -340,6 +372,33 @@ async def detect_stock(
         visible_controls[:40],
     )
 
+    # Railway 로그만으로 원인을 알기 어려울 때 확인할 진단 파일입니다.
+    try:
+        product_id = product_url.rstrip("/").split("/")[-1]
+        await page.screenshot(
+            path=f"/tmp/bstage-{product_id}.png",
+            full_page=True,
+        )
+        html = await page.content()
+        with open(
+            f"/tmp/bstage-{product_id}.html",
+            "w",
+            encoding="utf-8",
+        ) as html_file:
+            html_file.write(html)
+
+        log.warning(
+            "진단 파일 저장 완료: /tmp/bstage-%s.png, /tmp/bstage-%s.html",
+            product_id,
+            product_id,
+        )
+    except Exception as exc:
+        log.warning(
+            "진단 파일 저장 실패 | url=%s | error=%s",
+            product_url,
+            exc,
+        )
+
     return StockResult(
         available=False,
         reason="구매 가능 여부를 확실히 판단하지 못했습니다.",
@@ -418,6 +477,8 @@ async def run_monitor() -> None:
             args=[
                 "--disable-dev-shm-usage",
                 "--no-sandbox",
+                "--disable-blink-features=AutomationControlled",
+                "--window-size=1280,900",
             ],
         )
 

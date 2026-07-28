@@ -59,8 +59,15 @@ BUY_WORDS = (
     "바로 구매",
     "바로구매",
     "장바구니",
+    "신청하기",
+    "예약하기",
+    "예매하기",
+    "참여하기",
+    "응모하기",
     "buy now",
     "add to cart",
+    "apply",
+    "reserve",
 )
 
 
@@ -102,6 +109,19 @@ def send_discord(message: str) -> None:
     response.raise_for_status()
 
 
+async def is_disabled(element) -> bool:
+    disabled_attribute = await element.get_attribute("disabled")
+    aria_disabled = (
+        await element.get_attribute("aria-disabled") or ""
+    ).lower()
+
+    return (
+        await element.is_disabled()
+        or disabled_attribute is not None
+        or aria_disabled == "true"
+    )
+
+
 async def detect_stock(
     page: Page,
     product_url: str,
@@ -112,7 +132,30 @@ async def detect_stock(
         timeout=60_000,
     )
 
-    await page.wait_for_timeout(5_000)
+    # SPA 렌더링과 구매 버튼 표시를 기다립니다.
+    try:
+        await page.wait_for_load_state(
+            "networkidle",
+            timeout=15_000,
+        )
+    except Exception:
+        pass
+
+    try:
+        await page.locator(
+            "button:has-text('구매하기'), "
+            "a:has-text('구매하기'), "
+            "button:has-text('장바구니'), "
+            "button:has-text('신청하기'), "
+            "button:has-text('예약하기')"
+        ).first.wait_for(
+            state="attached",
+            timeout=15_000,
+        )
+    except Exception:
+        pass
+
+    await page.wait_for_timeout(2_000)
 
     title = (await page.title()).strip() or "비스테이지 상품"
 
@@ -126,27 +169,91 @@ async def detect_stock(
         body_text,
     ).lower()
 
+    # 1차: 실제 상품 구매 버튼을 직접 찾습니다.
+    direct_buy_controls = page.locator(
+        "button.ProductButton_btn__4N26E, "
+        "button[class*='ProductButton_btn'], "
+        "button:has-text('구매하기'), "
+        "a:has-text('구매하기'), "
+        "button:has-text('바로 구매'), "
+        "button:has-text('장바구니'), "
+        "button:has-text('신청하기'), "
+        "button:has-text('예약하기'), "
+        "button:has-text('예매하기'), "
+        "button:has-text('참여하기'), "
+        "button:has-text('응모하기')"
+    )
+
+    direct_count = await direct_buy_controls.count()
+    direct_disabled_found = False
+
+    for index in range(direct_count):
+        element = direct_buy_controls.nth(index)
+
+        try:
+            if not await element.is_visible():
+                continue
+
+            text = re.sub(
+                r"\s+",
+                " ",
+                " ".join(
+                    [
+                        (await element.inner_text()).strip(),
+                        (await element.get_attribute("aria-label") or "").strip(),
+                        (await element.get_attribute("title") or "").strip(),
+                    ]
+                ),
+            ).lower().strip()
+
+            if not any(word in text for word in BUY_WORDS):
+                continue
+
+            if await is_disabled(element):
+                direct_disabled_found = True
+                continue
+
+            return StockResult(
+                available=True,
+                reason=f"활성화된 구매 버튼을 찾았습니다: {text}",
+                title=title,
+            )
+
+        except Exception as exc:
+            log.debug(
+                "직접 구매 버튼 검사 실패 | index=%s | error=%s",
+                index,
+                exc,
+            )
+
+    # 2차: 전체 인터랙티브 요소를 검사합니다.
     interactive = page.locator(
         "button, a, [role='button']"
     )
 
-    count = min(
-        await interactive.count(),
-        300,
-    )
+    count = await interactive.count()
 
     active_buy_control = False
-    disabled_buy_control = False
+    disabled_buy_control = direct_disabled_found
 
     for index in range(count):
         element = interactive.nth(index)
 
         try:
+            if not await element.is_visible():
+                continue
+
             text = re.sub(
                 r"\s+",
                 " ",
-                (await element.inner_text()).strip(),
-            ).lower()
+                " ".join(
+                    [
+                        (await element.inner_text()).strip(),
+                        (await element.get_attribute("aria-label") or "").strip(),
+                        (await element.get_attribute("title") or "").strip(),
+                    ]
+                ),
+            ).lower().strip()
 
             if not text:
                 continue
@@ -157,22 +264,7 @@ async def detect_stock(
             ):
                 continue
 
-            disabled_attribute = (
-                await element.get_attribute("disabled")
-            )
-
-            aria_disabled = (
-                await element.get_attribute("aria-disabled")
-                or ""
-            ).lower()
-
-            is_disabled = (
-                await element.is_disabled()
-                or disabled_attribute is not None
-                or aria_disabled == "true"
-            )
-
-            if is_disabled:
+            if await is_disabled(element):
                 disabled_buy_control = True
             else:
                 active_buy_control = True
@@ -189,7 +281,8 @@ async def detect_stock(
         None,
     )
 
-    if active_buy_control and not sold_out_word:
+    # 활성 구매 버튼이 있으면 페이지 다른 영역의 품절 문구보다 우선합니다.
+    if active_buy_control:
         return StockResult(
             available=True,
             reason="활성화된 구매 버튼을 찾았습니다.",
@@ -212,6 +305,40 @@ async def detect_stock(
             reason="구매 버튼이 비활성화되어 있습니다.",
             title=title,
         )
+
+    # 판정 실패 시 실제 버튼 문구를 Railway 로그에 출력합니다.
+    visible_controls = []
+
+    for index in range(count):
+        element = interactive.nth(index)
+
+        try:
+            if not await element.is_visible():
+                continue
+
+            control_text = re.sub(
+                r"\s+",
+                " ",
+                " ".join(
+                    [
+                        (await element.inner_text()).strip(),
+                        (await element.get_attribute("aria-label") or "").strip(),
+                        (await element.get_attribute("title") or "").strip(),
+                    ]
+                ),
+            ).strip()
+
+            if control_text:
+                visible_controls.append(control_text[:120])
+
+        except Exception:
+            continue
+
+    log.warning(
+        "구매 상태 판정 실패 | url=%s | visible_controls=%s",
+        product_url,
+        visible_controls[:40],
+    )
 
     return StockResult(
         available=False,

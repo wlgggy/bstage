@@ -10,10 +10,10 @@ from typing import Optional
 import requests
 from playwright.async_api import async_playwright, Page
 
-PRODUCT_URL = os.getenv(
-    "PRODUCT_URL",
+PRODUCT_URLS = [
     "https://rolster.bstage.in/shop/products/279",
-).strip()
+    "https://rolster.bstage.in/shop/products/280",
+]
 
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "").strip()
 CHECK_INTERVAL_SECONDS = max(30, int(os.getenv("CHECK_INTERVAL_SECONDS", "120")))

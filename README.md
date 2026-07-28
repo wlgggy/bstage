@@ -5,6 +5,7 @@
 기본 상품:
 
 - https://rolster.bstage.in/shop/products/279
+- new! https://rolster.bstage.in/shop/products/280
 
 ## 포함된 기능
 

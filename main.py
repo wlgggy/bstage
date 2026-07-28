@@ -12,7 +12,7 @@ from playwright.async_api import Page, async_playwright
 
 
 DEFAULT_PRODUCT_URLS = (
-    "https://rolster.bstage.in/shop/products/278,"
+    "https://rolster.bstage.in/shop/products/287,"
     "https://rolster.bstage.in/shop/products/280"
 )
 

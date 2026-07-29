@@ -65,6 +65,7 @@ BUY_WORDS = (
     "참여하기",
     "응모하기",
     "buy now",
+    "order now",
     "add to cart",
     "apply",
     "reserve",
@@ -122,6 +123,28 @@ async def is_disabled(element) -> bool:
     )
 
 
+async def dismiss_cookie_banner(page: Page) -> None:
+    cookie_buttons = page.locator(
+        "button:has-text('전체 쿠키 허용하기'), "
+        "button:has-text('Allow all cookies'), "
+        "button:has-text('Accept all'), "
+        "button:has-text('Accept'), "
+        "button:has-text('동의'), "
+        "button:has-text('모두 허용')"
+    )
+
+    for index in range(await cookie_buttons.count()):
+        button = cookie_buttons.nth(index)
+
+        try:
+            if await button.is_visible() and not await is_disabled(button):
+                await button.click(timeout=3_000)
+                await page.wait_for_timeout(500)
+                return
+        except Exception:
+            continue
+
+
 async def detect_stock(
     page: Page,
     product_url: str,
@@ -141,13 +164,17 @@ async def detect_stock(
     except Exception:
         pass
 
+    await dismiss_cookie_banner(page)
+
     try:
         await page.locator(
             "button:has-text('구매하기'), "
             "a:has-text('구매하기'), "
             "button:has-text('장바구니'), "
             "button:has-text('신청하기'), "
-            "button:has-text('예약하기')"
+            "button:has-text('예약하기'), "
+            "button:has-text('Order Now'), "
+            "a:has-text('Order Now')"
         ).first.wait_for(
             state="attached",
             timeout=15_000,
@@ -181,7 +208,9 @@ async def detect_stock(
         "button:has-text('예약하기'), "
         "button:has-text('예매하기'), "
         "button:has-text('참여하기'), "
-        "button:has-text('응모하기')"
+        "button:has-text('응모하기'), "
+        "button:has-text('Order Now'), "
+        "a:has-text('Order Now')"
     )
 
     direct_count = await direct_buy_controls.count()

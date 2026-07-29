@@ -115,14 +115,6 @@ def discord_embed(
     return embed
 
 
-def discord_link_embed(title: str, url: str) -> dict:
-    return discord_embed(
-        title=title,
-        description=url,
-        color=0x5865F2,
-    )
-
-
 def send_discord(
     message: str = "",
     embeds: Optional[list[dict]] = None,
@@ -499,12 +491,9 @@ async def run_monitor() -> None:
                         },
                     ],
                 ),
-                discord_link_embed(
-                    "감시 상품 링크",
-                    product_list[:4096],
-                ),
             ],
         )
+        send_discord(product_list[:2000])
 
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(
@@ -543,10 +532,7 @@ async def run_monitor() -> None:
                             previous_available[product_url]
                         )
 
-                        if (
-                            result.available
-                            and previous_state is not True
-                        ):
+                        if result.available:
                             send_discord(
                                 "🚨 재입고 감지",
                                 embeds=[
@@ -579,12 +565,9 @@ async def run_monitor() -> None:
                                             },
                                         ],
                                     ),
-                                    discord_link_embed(
-                                        "상품 링크",
-                                        product_url,
-                                    ),
                                 ],
                             )
+                            send_discord(product_url)
 
                         if (
                             previous_state is True
@@ -711,12 +694,9 @@ async def run_monitor() -> None:
                                     },
                                 ],
                             ),
-                            discord_link_embed(
-                                "감시 상품 링크",
-                                product_list[:4096],
-                            ),
                         ],
                     )
+                    send_discord(product_list[:2000])
 
                     last_heartbeat_at = current_monotonic
 

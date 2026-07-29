@@ -10,11 +10,7 @@ from typing import Optional
 import requests
 from playwright.async_api import Page, async_playwright
 
-
-DEFAULT_PRODUCT_URLS = (
-    "https://rolster.bstage.in/shop/products/287,"
-    "https://rolster.bstage.in/shop/products/280"
-)
+DEFAULT_PRODUCT_URLS = ""
 
 PRODUCT_URLS = [
     url.strip()

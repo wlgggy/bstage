@@ -10,7 +10,11 @@ from typing import Optional
 import requests
 from playwright.async_api import Page, async_playwright
 
-DEFAULT_PRODUCT_URLS = ""
+
+DEFAULT_PRODUCT_URLS = (
+    "https://rolster.bstage.in/shop/products/287,"
+    "https://rolster.bstage.in/shop/products/280"
+)
 
 PRODUCT_URLS = [
     url.strip()
@@ -88,18 +92,49 @@ def now_kst() -> str:
     return datetime.now(kst).strftime("%Y-%m-%d %H:%M:%S KST")
 
 
-def send_discord(message: str) -> None:
+def discord_embed(
+    *,
+    title: str,
+    description: str,
+    color: int,
+    fields: Optional[list[dict]] = None,
+) -> dict:
+    embed = {
+        "title": title,
+        "description": description,
+        "color": color,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "footer": {
+            "text": "bstage stock monitor",
+        },
+    }
+
+    if fields:
+        embed["fields"] = fields
+
+    return embed
+
+
+def send_discord(
+    message: str = "",
+    embeds: Optional[list[dict]] = None,
+) -> None:
     if not DISCORD_WEBHOOK_URL:
         raise RuntimeError(
             "DISCORD_WEBHOOK_URL 환경변수가 비어 있습니다."
         )
 
+    payload = {
+        "content": message,
+        "allowed_mentions": {"parse": []},
+    }
+
+    if embeds:
+        payload["embeds"] = embeds
+
     response = requests.post(
         DISCORD_WEBHOOK_URL,
-        json={
-            "content": message,
-            "allowed_mentions": {"parse": []},
-        },
+        json=payload,
         timeout=20,
     )
 
@@ -428,13 +463,35 @@ async def run_monitor() -> None:
 
     if STARTUP_NOTIFICATION:
         send_discord(
-            "✅ **비스테이지 재고 감시를 시작했어요.**\n"
-            f"감시 상품: **{len(PRODUCT_URLS)}개**\n"
-            f"{product_list}\n"
-            f"재고 확인 주기: "
-            f"**{CHECK_INTERVAL_SECONDS}초**\n"
-            f"상태 알림 주기: "
-            f"**{HEARTBEAT_INTERVAL_SECONDS}초**"
+            embeds=[
+                discord_embed(
+                    title="비스테이지 재고 감시 시작",
+                    description="상품 재고 감시를 시작했습니다.",
+                    color=0x3498DB,
+                    fields=[
+                        {
+                            "name": "감시 상품",
+                            "value": f"{len(PRODUCT_URLS)}개",
+                            "inline": True,
+                        },
+                        {
+                            "name": "재고 확인 주기",
+                            "value": f"{CHECK_INTERVAL_SECONDS}초",
+                            "inline": True,
+                        },
+                        {
+                            "name": "상태 알림 주기",
+                            "value": f"{HEARTBEAT_INTERVAL_SECONDS}초",
+                            "inline": True,
+                        },
+                        {
+                            "name": "상품 URL",
+                            "value": product_list[:1024],
+                            "inline": False,
+                        },
+                    ],
+                )
+            ],
         )
 
     async with async_playwright() as playwright:
@@ -479,12 +536,43 @@ async def run_monitor() -> None:
                             and previous_state is not True
                         ):
                             send_discord(
-                                "🚨 **재입고 감지! "
-                                "지금 확인해 봐!**\n"
-                                f"상품: **{result.title}**\n"
-                                f"상태: **구매 가능**\n"
-                                f"확인 시각: {now_kst()}\n"
-                                f"{product_url}"
+                                "🚨 재입고 감지",
+                                embeds=[
+                                    discord_embed(
+                                        title="재입고 감지",
+                                        description=(
+                                            "구매 가능한 버튼을 찾았습니다."
+                                        ),
+                                        color=0x2ECC71,
+                                        fields=[
+                                            {
+                                                "name": "상품",
+                                                "value": result.title[:1024],
+                                                "inline": False,
+                                            },
+                                            {
+                                                "name": "상태",
+                                                "value": "구매 가능",
+                                                "inline": True,
+                                            },
+                                            {
+                                                "name": "확인 시각",
+                                                "value": now_kst(),
+                                                "inline": True,
+                                            },
+                                            {
+                                                "name": "판정 사유",
+                                                "value": result.reason[:1024],
+                                                "inline": False,
+                                            },
+                                            {
+                                                "name": "URL",
+                                                "value": product_url,
+                                                "inline": False,
+                                            },
+                                        ],
+                                    )
+                                ],
                             )
 
                         if (
@@ -515,9 +603,31 @@ async def run_monitor() -> None:
                     if NOTIFY_ON_ERROR and not error_notified:
                         try:
                             send_discord(
-                                "⚠️ 비스테이지 재고 확인 중 "
-                                "오류가 발생했어요.\n"
-                                "Railway 로그를 확인해 주세요."
+                                "⚠️ 감시 오류",
+                                embeds=[
+                                    discord_embed(
+                                        title="재고 확인 오류",
+                                        description=(
+                                            "비스테이지 재고 확인 중 "
+                                            "오류가 발생했습니다."
+                                        ),
+                                        color=0xE74C3C,
+                                        fields=[
+                                            {
+                                                "name": "조치",
+                                                "value": (
+                                                    "Railway 로그를 확인해 주세요."
+                                                ),
+                                                "inline": False,
+                                            },
+                                            {
+                                                "name": "발생 시각",
+                                                "value": now_kst(),
+                                                "inline": True,
+                                            },
+                                        ],
+                                    )
+                                ],
                             )
                             error_notified = True
                         except Exception:
@@ -544,36 +654,54 @@ async def run_monitor() -> None:
                 )
 
                 if heartbeat_due:
-                    status_lines = []
+                    status_fields = []
 
                     for product_url in PRODUCT_URLS:
                         result = latest_results.get(product_url)
 
                         if result is None:
-                            status_lines.append(
-                                "⚪ **확인 전**\n"
-                                f"{product_url}"
+                            status_fields.append(
+                                {
+                                    "name": "확인 전",
+                                    "value": product_url,
+                                    "inline": False,
+                                }
                             )
                             continue
 
                         if result.available:
-                            emoji = "🟢"
                             status = "구매 가능"
                         else:
-                            emoji = "🟡"
                             status = "품절 또는 구매 불가"
 
-                        status_lines.append(
-                            f"{emoji} **{result.title}**\n"
-                            f"현재 상태: **{status}**\n"
-                            f"{product_url}"
+                        status_fields.append(
+                            {
+                                "name": result.title[:256],
+                                "value": (
+                                    f"상태: **{status}**\n"
+                                    f"사유: {result.reason}\n"
+                                    f"{product_url}"
+                                )[:1024],
+                                "inline": False,
+                            }
                         )
 
                     send_discord(
-                        "🔍 **비스테이지 상품을 "
-                        "정상 감시 중입니다.**\n\n"
-                        + "\n\n".join(status_lines)
-                        + f"\n\n마지막 확인: {now_kst()}"
+                        embeds=[
+                            discord_embed(
+                                title="비스테이지 감시 상태",
+                                description="상품을 정상 감시 중입니다.",
+                                color=0xF1C40F,
+                                fields=[
+                                    *status_fields[:24],
+                                    {
+                                        "name": "마지막 확인",
+                                        "value": now_kst(),
+                                        "inline": False,
+                                    },
+                                ],
+                            )
+                        ],
                     )
 
                     last_heartbeat_at = current_monotonic

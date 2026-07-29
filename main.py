@@ -115,6 +115,14 @@ def discord_embed(
     return embed
 
 
+def discord_link_embed(title: str, url: str) -> dict:
+    return discord_embed(
+        title=title,
+        description=url,
+        color=0x5865F2,
+    )
+
+
 def send_discord(
     message: str = "",
     embeds: Optional[list[dict]] = None,
@@ -485,12 +493,16 @@ async def run_monitor() -> None:
                             "inline": True,
                         },
                         {
-                            "name": "상품 URL",
-                            "value": product_list[:1024],
+                            "name": "시작 시각",
+                            "value": now_kst(),
                             "inline": False,
                         },
                     ],
-                )
+                ),
+                discord_link_embed(
+                    "감시 상품 링크",
+                    product_list[:4096],
+                ),
             ],
         )
 
@@ -565,13 +577,12 @@ async def run_monitor() -> None:
                                                 "value": result.reason[:1024],
                                                 "inline": False,
                                             },
-                                            {
-                                                "name": "URL",
-                                                "value": product_url,
-                                                "inline": False,
-                                            },
                                         ],
-                                    )
+                                    ),
+                                    discord_link_embed(
+                                        "상품 링크",
+                                        product_url,
+                                    ),
                                 ],
                             )
 
@@ -663,7 +674,7 @@ async def run_monitor() -> None:
                             status_fields.append(
                                 {
                                     "name": "확인 전",
-                                    "value": product_url,
+                                    "value": "아직 확인 결과가 없습니다.",
                                     "inline": False,
                                 }
                             )
@@ -679,8 +690,7 @@ async def run_monitor() -> None:
                                 "name": result.title[:256],
                                 "value": (
                                     f"상태: **{status}**\n"
-                                    f"사유: {result.reason}\n"
-                                    f"{product_url}"
+                                    f"사유: {result.reason}"
                                 )[:1024],
                                 "inline": False,
                             }
@@ -700,7 +710,11 @@ async def run_monitor() -> None:
                                         "inline": False,
                                     },
                                 ],
-                            )
+                            ),
+                            discord_link_embed(
+                                "감시 상품 링크",
+                                product_list[:4096],
+                            ),
                         ],
                     )
 

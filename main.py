@@ -567,4 +567,3 @@ async def run_monitor() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(run_monitor())
